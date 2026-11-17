@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+artifacts/
+Reports/
+*.user
+*.log
+recovery*.json
+settings.json
+ui-test.png
+Screenshots/
