@@ -33,11 +33,13 @@ internal sealed class GammaSession : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);File.WriteAllText(path+".tmp",JsonSerializer.Serialize(state));File.Move(path+".tmp",path,true);
     }
     internal static ushort[] Compose(ushort[] baseline,double gamma)
+        =>Compose(baseline,new Tone(gamma));
+    internal static ushort[] Compose(ushort[] baseline,Tone tone)
     {
         var result=new ushort[768];
         for(var c=0;c<3;c++)for(var i=0;i<256;i++)
         {
-            var at=Math.Pow(i/255.0,1/Math.Clamp(gamma,1,2))*255;var lo=Math.Min(255,(int)at);var hi=Math.Min(255,lo+1);
+            var at=ToneCurve.Map(i/255.0,tone)*255;var lo=Math.Min(255,(int)at);var hi=Math.Min(255,lo+1);
             result[c*256+i]=(ushort)Math.Round(baseline[c*256+lo]+(baseline[c*256+hi]-baseline[c*256+lo])*(at-lo));
         }
         return result;
@@ -45,11 +47,13 @@ internal sealed class GammaSession : IDisposable
     internal double LastWriteMs {get;private set;}
     internal bool Verified {get;private set;}
     internal void Apply(double gamma)
+        =>Apply(new Tone(gamma));
+    internal void Apply(Tone tone)
     {
-        var curve=Compose(state.Baseline,gamma);
+        var curve=Compose(state.Baseline,tone);
         if(last!=null && curve.Zip(last,(a,b)=>Math.Abs((int)a-b)).Max()<80)return;
         restored=false;var watch=Stopwatch.StartNew();device.Write(state.Display,curve);LastWriteMs=watch.Elapsed.TotalMilliseconds;last=curve;
-        if(!Verified && gamma>1.06)
+        if(!Verified && curve.Zip(state.Baseline,(a,b)=>Math.Abs((int)a-b)).Max()>1800)
         {
             var read=device.Read(state.Display);var difference=curve.Zip(read,(a,b)=>Math.Abs((int)a-b)).Max();
             if(difference>2048)throw new IOException("驱动的 Gamma 回读与目标不符，已停止自动调整。请确认 HDR 和其他色彩工具已关闭。");Verified=true;

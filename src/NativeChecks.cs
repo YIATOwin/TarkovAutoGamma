@@ -18,7 +18,7 @@ internal static class NativeChecks
             using(var session=new GammaSession(device,display,journal))
             using(var guard=new RecoveryGuard(journal))
             {
-                session.Apply(1.08);events.Add($"Gamma write/readback verified={session.Verified}, write={session.LastWriteMs:F2}ms");session.Restore();
+                session.Apply(new Tone(1.08,.025,.04));events.Add($"Combined Gamma/brightness/contrast write/readback verified={session.Verified}, write={session.LastWriteMs:F2}ms");session.Restore();
             }
             var difference=Difference(device.Read(display),baseline);if(difference>512)throw new Exception("Normal restoration differs: "+difference);events.Add("Normal restore verified, max difference "+difference);
             var info=new ProcessStartInfo(Environment.ProcessPath!){UseShellExecute=false,CreateNoWindow=true};
@@ -51,7 +51,7 @@ internal static class NativeChecks
     {
         try
         {
-            using var session=new GammaSession(new GammaDevice(),args[1],args[2]);using var guard=new RecoveryGuard(args[2]);session.Apply(1.08);
+            using var session=new GammaSession(new GammaDevice(),args[1],args[2]);using var guard=new RecoveryGuard(args[2]);session.Apply(new Tone(1.08,.025,.04));
             File.WriteAllText(args[3],JsonSerializer.Serialize(new{Parent=Environment.ProcessId}));Thread.Sleep(Timeout.Infinite);return 0;
         }
         catch(Exception e){File.WriteAllText(args[3]+".error",e.ToString());return 1;}

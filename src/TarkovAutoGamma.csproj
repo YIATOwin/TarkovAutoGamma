@@ -5,7 +5,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier><SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile><EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract><DebugType>none</DebugType>
-    <Version>0.1.0</Version><AssemblyName>TarkovAutoGamma</AssemblyName><ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <Version>0.2.0</Version><AssemblyName>TarkovAutoGamma</AssemblyName><ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3"/>

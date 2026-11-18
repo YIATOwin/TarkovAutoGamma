@@ -21,18 +21,18 @@ internal sealed class AdaptiveMeter
     }
     double Quantile(double q){double sum=0;for(var i=0;i<256;i++){sum+=histogram[i];if(sum>=q-1e-9)return i/255.0;}return 1;}
     internal static double TargetGamma(Scene s,Settings settings)
+        =>TargetTone(s,settings).Gamma;
+    internal static Tone TargetTone(Scene s,Settings settings)
     {
-        if(s.BlackFraction>.995 || s.P95<.015 || s.NightVision)return 1;
+        if(s.BlackFraction>.995 || s.P95<.015 || s.NightVision)return Tone.Identity;
         var darkness=1-Smooth(.09,.43,s.Median);
         var shadows=1-Smooth(.025,.16,s.P10);
         // Bright windows/sky reduce the boost without disabling dark interior recovery.
         var highlightGuard=1-.3*Smooth(.76,.98,s.P95);
-        return 1+(settings.MaxGamma-1)*settings.Strength/100.0*darkness*(.7+.3*shadows)*highlightGuard;
+        var amount=settings.Strength/100.0*darkness*(.7+.3*shadows)*highlightGuard;
+        var flat=1-Smooth(.2,.65,s.P95-s.P10);
+        return new(1+(settings.MaxGamma-1)*amount,settings.Brightness/100.0*amount,
+            settings.Contrast/100.0*amount*(.65+.35*flat));
     }
     static double Smooth(double a,double b,double x){var t=Math.Clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);}
-    internal static double SmoothGamma(double current,double target,double elapsed,int transitionMs)
-    {
-        if(Math.Abs(current-target)<.006)return current;
-        return current+(target-current)*(1-Math.Exp(-Math.Clamp(elapsed,0,.5)/(transitionMs/1000.0)));
-    }
 }

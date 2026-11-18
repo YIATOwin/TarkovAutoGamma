@@ -5,128 +5,128 @@ using Microsoft.Win32;
 internal sealed class MainForm : Form
 {
     readonly Settings settings=Settings.Load();readonly FilterEngine engine;
-    readonly ComboBox display=new(){DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
+    readonly ComboBox display=new(){DropDownStyle=ComboBoxStyle.DropDownList,Width=205};
     readonly ComboBox frequency=new(){DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
     readonly ComboBox weight=new(){DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
-    readonly TrackBar strength=new(){Minimum=0,Maximum=100,TickFrequency=10,Dock=DockStyle.Fill,AutoSize=false,Height=40};
-    readonly NumericUpDown gamma=new(){Minimum=1,Maximum=2,DecimalPlaces=2,Increment=.05m,Dock=DockStyle.Fill};
-    readonly NumericUpDown transition=new(){Minimum=300,Maximum=4000,Increment=100,Dock=DockStyle.Fill};
-    readonly CheckBox gameOnly=new(){Text="仅在塔科夫处于前台时启用（推荐）",AutoSize=true,Checked=true};
-    readonly Button start=new(){Text="开启自动调整",AutoSize=true},restore=new(){Text="停止并恢复颜色",AutoSize=true},minimize=new(){Text="收起到托盘",AutoSize=true};
-    readonly Label state=new(){Text="尚未开启 · 当前显示颜色保持原样",AutoSize=true,Dock=DockStyle.Fill};
-    readonly Label metrics=new(){Text="等待采样",AutoSize=true,Dock=DockStyle.Fill};
-    readonly Label strengthLabel=new(){AutoSize=true};
-    readonly CurvePanel curve=new(){Dock=DockStyle.Fill,MinimumSize=new(120,110)};
+    readonly TrackBar strength=Slider(0,100),gamma=Slider(100,200),brightness=Slider(-20,20),contrast=Slider(-30,30);
+    readonly NumericUpDown transition=new(){Minimum=100,Maximum=4000,Increment=50,Dock=DockStyle.Fill};
+    readonly CheckBox gameOnly=new(){Text="仅游戏前台",AutoSize=true};
+    readonly Button start=new(){Text="开启",AutoSize=true},restore=new(){Text="恢复",AutoSize=true},minimize=new(){Text="收起",AutoSize=true};
+    readonly Label state=new(){Text="已停止",AutoEllipsis=true,Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft};
+    readonly Label details=new(){Text="详情",AutoSize=true,Anchor=AnchorStyles.Right};
+    readonly Label sourceName=new(){Text="内置样图",AutoEllipsis=true,Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft};
+    readonly Label targetInfo=new(){AutoSize=true,Anchor=AnchorStyles.Right,TextAlign=ContentAlignment.MiddleRight};
+    readonly ComparisonPreview preview=new(){Dock=DockStyle.Fill,MinimumSize=new(200,140)};
+    readonly ToolTip tips=new(){InitialDelay=450,ReshowDelay=100,AutoPopDelay=15000,ShowAlways=true};
+    readonly System.Windows.Forms.Timer previewDelay=new(){Interval=90};
     readonly NotifyIcon tray=new(){Icon=SystemIcons.Application,Text="TarkovAutoGamma · 已停止",Visible=true};
-    bool initialized,closing,stopping;FilterStatus latest=new("未开启");
+    readonly Dictionary<TrackBar,Label> values=[];
+    bool initialized,closing,stopping;string? hotkeyWarning;string metricsTip="开启后可查看采集、分析、写入耗时和驱动曲线状态。";
+    static TrackBar Slider(int min,int max)=>new(){Minimum=min,Maximum=max,TickStyle=TickStyle.None,AutoSize=false,Height=32,Dock=DockStyle.Fill,Margin=new(0)};
     internal MainForm()
     {
-        Text="TarkovAutoGamma 0.1.0 · 自动亮度适应";ClientSize=new(790,780);MinimumSize=new(700,650);StartPosition=FormStartPosition.CenterScreen;
-        Font=new("Microsoft YaHei UI",10);BackColor=Color.FromArgb(18,23,29);ForeColor=Color.FromArgb(223,231,239);
+        Text="TarkovAutoGamma";ClientSize=new(1000,610);MinimumSize=new(870,580);StartPosition=FormStartPosition.CenterScreen;
+        Font=new("Microsoft YaHei UI",9.5f);BackColor=Color.FromArgb(18,23,29);ForeColor=Color.FromArgb(223,231,239);
         engine=new(settings with{},s=>{if(!IsDisposed && IsHandleCreated)try{BeginInvoke(()=>UpdateStatus(s));}catch(InvalidOperationException){}});
-        var root=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new(26),ColumnCount=1,RowCount=7,AutoScroll=true};
-        root.ColumnStyles.Add(new(SizeType.Percent,100));
-        var title=new Label{Text="随环境变化，轻柔提亮暗部",Font=new(Font.FontFamily,18,FontStyle.Bold),AutoSize=true,Dock=DockStyle.Fill,Margin=new(0,0,0,8)};
-        root.Controls.Add(title,0,0);
-        root.Controls.Add(new Label{Text="九区域加权采样  /  SDR 显示器  /  独立运行",AutoSize=true,ForeColor=Color.FromArgb(139,160,180),Margin=new(0,0,0,18)},0,1);
-        var form=new TableLayoutPanel{Dock=DockStyle.Top,AutoSize=true,ColumnCount=3,Padding=new(12),BackColor=Color.FromArgb(27,34,42)};
-        form.ColumnStyles.Add(new(SizeType.Absolute,150));form.ColumnStyles.Add(new(SizeType.Percent,100));form.ColumnStyles.Add(new(SizeType.Absolute,100));
-        void Row(int row,string label,Control input,Control? extra=null)
-        {
-            form.RowStyles.Add(new(SizeType.Absolute,row==1?52:40));form.Controls.Add(new Label{Text=label,AutoSize=true,Anchor=AnchorStyles.Left},0,row);
-            form.Controls.Add(input,1,row);if(extra!=null)form.Controls.Add(extra,2,row);else form.SetColumnSpan(input,2);
-        }
-        Row(0,"游戏所在显示器",display);Row(1,"滤镜强度",strength,strengthLabel);Row(2,"最强提亮 Gamma",gamma);Row(3,"检测频率",frequency);Row(4,"中心区域权重",weight);Row(5,"平滑时间（毫秒）",transition);
-        form.Controls.Add(gameOnly,0,6);form.SetColumnSpan(gameOnly,3);root.Controls.Add(form,0,2);
-        var actions=new FlowLayoutPanel{AutoSize=true,Dock=DockStyle.Fill,Margin=new(0,16,0,12)};actions.Controls.AddRange([start,restore,minimize]);root.Controls.Add(actions,0,3);
-        var live=new TableLayoutPanel{AutoSize=true,Dock=DockStyle.Fill,ColumnCount=2,BackColor=Color.FromArgb(27,34,42),Padding=new(12)};
-        live.ColumnStyles.Add(new(SizeType.Percent,65));live.ColumnStyles.Add(new(SizeType.Percent,35));
-        live.Controls.Add(state,0,0);live.Controls.Add(metrics,0,1);live.Controls.Add(curve,1,0);live.SetRowSpan(curve,2);root.Controls.Add(live,0,4);
-        root.Controls.Add(new Label{Text="Ctrl+Alt+F9 开启 / 停止    ·    Ctrl+Alt+F10 立即恢复\n关闭窗口会停止并退出；需要后台运行时，请收起到托盘。\n开启前请关闭 HDR 和其他 Gamma 工具。全黑画面和疑似绿色夜视会减弱提亮。",AutoSize=true,Dock=DockStyle.Fill,ForeColor=Color.FromArgb(139,160,180),Margin=new(0,14,0,0)},0,5);
-        var logs=new LinkLabel{Text="打开设置与错误日志目录",AutoSize=true,LinkColor=Color.FromArgb(101,185,224),Margin=new(0,12,0,0)};logs.LinkClicked+=(_,_)=>{try{Directory.CreateDirectory(Settings.Folder);Process.Start(new ProcessStartInfo(Settings.Folder){UseShellExecute=true});}catch(Exception e){MessageBox.Show(this,e.Message);}};root.Controls.Add(logs,0,6);
-        Controls.Add(root);
-        foreach(var c in new Control[]{display,frequency,weight,gamma,transition}){c.BackColor=Color.FromArgb(39,49,61);c.ForeColor=ForeColor;}
-        foreach(var combo in new[]{display,frequency,weight})
-        {
-            combo.DrawMode=DrawMode.OwnerDrawFixed;combo.FlatStyle=FlatStyle.Flat;combo.ItemHeight=24;
-            combo.DrawItem+=(_,e)=>{if(e.Index<0)return;using var bg=new SolidBrush((e.State&DrawItemState.Selected)!=0?Color.FromArgb(44,90,115):combo.BackColor);e.Graphics.FillRectangle(bg,e.Bounds);TextRenderer.DrawText(e.Graphics,combo.Items[e.Index]?.ToString(),combo.Font,e.Bounds,combo.ForeColor,TextFormatFlags.Left|TextFormatFlags.VerticalCenter);e.DrawFocusRectangle();};
-        }
-        foreach(Button b in actions.Controls){b.FlatStyle=FlatStyle.Flat;b.FlatAppearance.BorderColor=Color.FromArgb(72,92,111);b.BackColor=Color.FromArgb(39,49,61);b.ForeColor=ForeColor;b.Padding=new(9,6,9,6);}
-        start.BackColor=Color.FromArgb(32,108,139);
-        foreach(var screen in Screen.AllScreens)display.Items.Add(screen.DeviceName);
-        display.SelectedItem=settings.Display;if(display.SelectedIndex<0)display.SelectedItem=Screen.PrimaryScreen?.DeviceName;if(display.SelectedIndex<0 && display.Items.Count>0)display.SelectedIndex=0;
-        frequency.Items.AddRange(["2 次 / 秒（省电）","5 次 / 秒（推荐）","10 次 / 秒"]);frequency.SelectedIndex=Array.IndexOf(new[]{2,5,10},settings.Frequency);
-        weight.Items.AddRange(["20%（更均衡）","40%（推荐）","60%（优先中心）"]);weight.SelectedIndex=Array.IndexOf(new[]{20,40,60},settings.CenterWeight);
-        strength.Value=settings.Strength;gamma.Value=(decimal)settings.MaxGamma;transition.Value=settings.TransitionMs;gameOnly.Checked=settings.GameOnly;strengthLabel.Text=settings.Strength+"%";
-        display.SelectedIndexChanged+=(_,_)=>SaveSettings();frequency.SelectedIndexChanged+=(_,_)=>SaveSettings();weight.SelectedIndexChanged+=(_,_)=>SaveSettings();strength.ValueChanged+=(_,_)=>SaveSettings();gamma.ValueChanged+=(_,_)=>SaveSettings();transition.ValueChanged+=(_,_)=>SaveSettings();gameOnly.CheckedChanged+=(_,_)=>SaveSettings();
-        start.Click+=async(_,_)=>await Toggle();restore.Click+=async(_,_)=>await StopAndRestore();minimize.Click+=(_,_)=>{Hide();tray.ShowBalloonTip(2000,"TarkovAutoGamma","仍在后台运行；双击托盘图标打开。",ToolTipIcon.Info);};
-        tray.DoubleClick+=(_,_)=>ShowWindow();var menu=new ContextMenuStrip();menu.Items.Add("打开",null,(_,_)=>ShowWindow());menu.Items.Add("开启 / 停止",null,async(_,_)=>await Toggle());menu.Items.Add("恢复颜色",null,async(_,_)=>await StopAndRestore());menu.Items.Add("退出",null,(_,_)=>Close());tray.ContextMenuStrip=menu;
+        var root=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new(18),ColumnCount=1,RowCount=4};root.ColumnStyles.Add(new(SizeType.Percent,100));
+        root.RowStyles.Add(new(SizeType.Absolute,46));root.RowStyles.Add(new(SizeType.Percent,100));root.RowStyles.Add(new(SizeType.Absolute,54));root.RowStyles.Add(new(SizeType.Absolute,24));
+        var toolbar=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,Margin=new(0)};toolbar.ColumnStyles.Add(new(SizeType.Percent,100));toolbar.ColumnStyles.Add(new(SizeType.AutoSize));
+        var monitor=new FlowLayoutPanel{AutoSize=true,Dock=DockStyle.Fill,WrapContents=false};monitor.Controls.Add(new Label{Text="显示器",AutoSize=true,Margin=new(0,6,9,0)});monitor.Controls.Add(display);
+        var load=new Button{Text="载入截图",AutoSize=true};var sample=new Button{Text="内置样图",AutoSize=true};var imageActions=new FlowLayoutPanel{AutoSize=true,Dock=DockStyle.Fill,WrapContents=false};imageActions.Controls.AddRange([load,sample]);toolbar.Controls.Add(monitor,0,0);toolbar.Controls.Add(imageActions,1,0);root.Controls.Add(toolbar,0,0);
+        var content=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=3,Margin=new(0)};content.ColumnStyles.Add(new(SizeType.Absolute,280));content.ColumnStyles.Add(new(SizeType.Absolute,14));content.ColumnStyles.Add(new(SizeType.Percent,100));
+        var controls=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,Padding=new(14),AutoScroll=true,BackColor=Color.FromArgb(27,34,42)};controls.ColumnStyles.Add(new(SizeType.Percent,100));
+        AddSlider(controls,"Gamma",gamma,"暗处提亮的 Gamma 上限。\n默认 1.60；实际值会随画面亮度及总强度减弱。");
+        AddSlider(controls,"亮度",brightness,"暗处的柔和亮度补偿，范围 -20～+20。\n0 不补偿；保留黑白端点，避免整体泛白。明亮画面会减弱。");
+        AddSlider(controls,"对比度",contrast,"暗处的 S 曲线对比度，范围 -30～+30。\n正值加强层次，负值柔化明暗差；0 不额外调整。");
+        AddSlider(controls,"总强度",strength,"同时控制 Gamma、亮度和对比度的自动幅度。\n0% 为原始曲线，100% 使用完整建议。");
+        controls.Controls.Add(gameOnly);tips.SetToolTip(gameOnly,"只在 EscapeFromTarkov 位于所选显示器前台时调整。\n本窗口在前台时始终恢复显示颜色，防止预览被重复调色。");
+        var more=new Button{Text="更多 ▾",AutoSize=true,Margin=new(0,0,8,0)};var reset=new Button{Text="重置",AutoSize=true,Margin=new(0)};
+        var extraActions=new FlowLayoutPanel{AutoSize=true,Dock=DockStyle.Top,WrapContents=false,Margin=new(0,8,0,0)};extraActions.Controls.AddRange([more,reset]);controls.Controls.Add(extraActions);
+        var advanced=new TableLayoutPanel{ColumnCount=2,AutoSize=true,Dock=DockStyle.Top,Visible=false,Margin=new(0,8,0,0)};advanced.ColumnStyles.Add(new(SizeType.Absolute,82));advanced.ColumnStyles.Add(new(SizeType.Percent,100));
+        AddAdvanced(advanced,0,"检测频率",frequency,"每秒采集次数。默认 5 次；画面分析与曲线过渡独立运行。");
+        AddAdvanced(advanced,1,"中心权重",weight,"中央区域的占比；剩余权重分给四边与四角。");
+        AddAdvanced(advanced,2,"过渡 ms",transition,"默认约 300ms 到达新目标，含亮度与对比度。\n目标持续变化时会重新衔接；显卡写入延迟可能延长实际耗时。");controls.Controls.Add(advanced);
+        tips.SetToolTip(reset,"恢复默认滤镜参数及 300ms 过渡，保留所选显示器。");
+        more.Click+=(_,_)=>{advanced.Visible=!advanced.Visible;more.Text=advanced.Visible?"更多 ▴":"更多 ▾";};content.Controls.Add(controls,0,0);
+        var imageCard=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,BackColor=Color.FromArgb(27,34,42),Margin=new(0)};imageCard.ColumnStyles.Add(new(SizeType.Percent,100));imageCard.RowStyles.Add(new(SizeType.Percent,100));imageCard.RowStyles.Add(new(SizeType.Absolute,40));imageCard.Controls.Add(preview,0,0);
+        var caption=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,Padding=new(10,0,10,0),Margin=new(0)};caption.ColumnStyles.Add(new(SizeType.Percent,100));caption.ColumnStyles.Add(new(SizeType.AutoSize));caption.Controls.Add(sourceName,0,0);caption.Controls.Add(targetInfo,1,0);imageCard.Controls.Add(caption,0,1);content.Controls.Add(imageCard,2,0);root.Controls.Add(content,0,1);
+        var actions=new FlowLayoutPanel{AutoSize=true,Dock=DockStyle.Fill,Margin=new(0,10,0,0),WrapContents=false};var menuButton=new Button{Text="⋯",AutoSize=true};actions.Controls.AddRange([start,restore,minimize,menuButton]);root.Controls.Add(actions,0,2);
+        var footer=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,Margin=new(0)};footer.ColumnStyles.Add(new(SizeType.Percent,100));footer.ColumnStyles.Add(new(SizeType.AutoSize));footer.Controls.Add(state,0,0);footer.Controls.Add(details,1,0);root.Controls.Add(footer,0,3);Controls.Add(root);
+        foreach(var combo in new[]{display,frequency,weight})StyleCombo(combo);foreach(var input in new Control[]{transition}){input.BackColor=Color.FromArgb(39,49,61);input.ForeColor=ForeColor;}
+        foreach(var button in new[]{start,restore,minimize,menuButton,load,sample,more,reset})StyleButton(button);start.BackColor=Color.FromArgb(32,108,139);
+        tips.SetToolTip(display,"选择游戏使用的横向 SDR 显示器。开启前请关闭 HDR / 自动 HDR，以及其他 Gamma 工具。");tips.SetToolTip(load,"载入本机 PNG / JPEG / BMP 截图作为对比图，最大 40MB。\n只在本机预览，不上传，也不改变显示器颜色。");tips.SetToolTip(sample,"使用内置的暗处、亮窗及灰阶样图。");tips.SetToolTip(preview,"拖动分界线查看同一位置的原图与效果，也可用左右方向键。\n预览显示当前图片的最终目标曲线；游戏中按实时画面重新计算。\n图片模拟不包含显示器校准及驱动差异。");tips.SetToolTip(targetInfo,"基于当前预览图片计算的目标值。\n亮度和对比度会随暗部、总强度及高光保护减弱。");
+        tips.SetToolTip(start,"开启 / 暂停自动调整：Ctrl+Alt+F9。\n本窗口处于前台时暂停硬件调整，回到游戏后继续。");tips.SetToolTip(restore,"停止并恢复开启前的颜色：Ctrl+Alt+F10。");tips.SetToolTip(minimize,"收起到系统托盘继续运行；双击托盘图标打开。\n关闭窗口会停止并退出。");
+        tips.SetToolTip(details,metricsTip);details.MouseEnter+=(_,_)=>tips.SetToolTip(details,metricsTip);
+        foreach(var screen in Screen.AllScreens)display.Items.Add(screen.DeviceName);display.SelectedItem=settings.Display;if(display.SelectedIndex<0)display.SelectedItem=Screen.PrimaryScreen?.DeviceName;if(display.SelectedIndex<0 && display.Items.Count>0)display.SelectedIndex=0;
+        frequency.Items.AddRange(["2 次/秒","5 次/秒","10 次/秒"]);weight.Items.AddRange(["20%","40%","60%"]);LoadControls();
+        display.SelectedIndexChanged+=(_,_)=>SaveSettings();frequency.SelectedIndexChanged+=(_,_)=>SaveSettings();weight.SelectedIndexChanged+=(_,_)=>SaveSettings();transition.ValueChanged+=(_,_)=>SaveSettings();gameOnly.CheckedChanged+=(_,_)=>SaveSettings();foreach(var slider in values.Keys)slider.ValueChanged+=(_,_)=>SaveSettings();
+        previewDelay.Tick+=(_,_)=>{previewDelay.Stop();try{preview.RefreshEffect(settings);UpdatePreviewCaption();}catch(Exception e){state.Text="预览失败";tips.SetToolTip(state,e.Message);}};
+        load.Click+=(_,_)=>ImportImage();sample.Click+=(_,_)=>{preview.UseSample(settings);UpdatePreviewCaption();};reset.Click+=(_,_)=>ResetSettings();
+        start.Click+=async(_,_)=>await Toggle();restore.Click+=async(_,_)=>await StopAndRestore();minimize.Click+=(_,_)=>Hide();tray.DoubleClick+=(_,_)=>ShowWindow();
+        var menu=new ContextMenuStrip();menu.Items.Add("打开",null,(_,_)=>ShowWindow());menu.Items.Add("开启 / 暂停",null,async(_,_)=>await Toggle());menu.Items.Add("恢复颜色",null,async(_,_)=>await StopAndRestore());menu.Items.Add("设置与日志",null,(_,_)=>OpenSettings());menu.Items.Add("退出",null,(_,_)=>Close());tray.ContextMenuStrip=menu;menuButton.Click+=(_,_)=>menu.Show(menuButton,new Point(0,menuButton.Height));
         SystemEvents.DisplaySettingsChanging+=DisplayChanged;SystemEvents.SessionSwitch+=SessionChanged;SystemEvents.PowerModeChanged+=PowerChanged;
-        initialized=true;SaveSettings();
+        initialized=true;SaveSettings();preview.UseSample(settings);UpdatePreviewCaption();
     }
-    void ShowWindow(){Show();WindowState=FormWindowState.Normal;Activate();}
+    void AddSlider(TableLayoutPanel parent,string name,TrackBar slider,string tip)
+    {
+        slider.AccessibleName=name;var row=new TableLayoutPanel{ColumnCount=2,RowCount=2,Dock=DockStyle.Top,Height=54,Margin=new(0,0,0,2)};row.ColumnStyles.Add(new(SizeType.Percent,100));row.ColumnStyles.Add(new(SizeType.Absolute,64));row.RowStyles.Add(new(SizeType.Absolute,23));row.RowStyles.Add(new(SizeType.Percent,100));
+        var label=new Label{Text=name,AutoSize=true,Anchor=AnchorStyles.Left};var value=new Label{AutoSize=true,Anchor=AnchorStyles.Right};row.Controls.Add(label,0,0);row.Controls.Add(value,1,0);row.Controls.Add(slider,0,1);row.SetColumnSpan(slider,2);parent.Controls.Add(row);values.Add(slider,value);tips.SetToolTip(label,tip);tips.SetToolTip(slider,tip);tips.SetToolTip(value,tip);
+    }
+    void AddAdvanced(TableLayoutPanel parent,int row,string name,Control control,string tip)
+    {
+        parent.RowStyles.Add(new(SizeType.Absolute,34));var label=new Label{Text=name,AutoSize=true,Anchor=AnchorStyles.Left};parent.Controls.Add(label,0,row);parent.Controls.Add(control,1,row);tips.SetToolTip(label,tip);tips.SetToolTip(control,tip);
+    }
+    void StyleCombo(ComboBox combo)
+    {
+        combo.BackColor=Color.FromArgb(39,49,61);combo.ForeColor=ForeColor;combo.DrawMode=DrawMode.OwnerDrawFixed;combo.FlatStyle=FlatStyle.Flat;combo.ItemHeight=23;
+        combo.DrawItem+=(_,e)=>{if(e.Index<0)return;using var bg=new SolidBrush((e.State&DrawItemState.Selected)!=0?Color.FromArgb(44,90,115):combo.BackColor);e.Graphics.FillRectangle(bg,e.Bounds);TextRenderer.DrawText(e.Graphics,combo.Items[e.Index]?.ToString(),combo.Font,e.Bounds,combo.ForeColor,TextFormatFlags.Left|TextFormatFlags.VerticalCenter);e.DrawFocusRectangle();};
+    }
+    void StyleButton(Button button){button.FlatStyle=FlatStyle.Flat;button.FlatAppearance.BorderColor=Color.FromArgb(64,79,94);button.BackColor=Color.FromArgb(35,44,54);button.ForeColor=ForeColor;button.Padding=new(10,5,10,5);}
+    void LoadControls()
+    {
+        frequency.SelectedIndex=Array.IndexOf(new[]{2,5,10},settings.Frequency);weight.SelectedIndex=Array.IndexOf(new[]{20,40,60},settings.CenterWeight);gamma.Value=(int)Math.Round(settings.MaxGamma*100);brightness.Value=settings.Brightness;contrast.Value=settings.Contrast;strength.Value=settings.Strength;transition.Value=settings.TransitionMs;gameOnly.Checked=settings.GameOnly;UpdateValues();
+    }
+    void UpdateValues(){values[gamma].Text=(gamma.Value/100.0).ToString("F2");values[brightness].Text=brightness.Value.ToString("+0;-0;0");values[contrast].Text=contrast.Value.ToString("+0;-0;0");values[strength].Text=strength.Value+"%";}
     void SaveSettings()
     {
-        if(!initialized)return;settings.Display=display.SelectedItem?.ToString()??"";settings.Frequency=new[]{2,5,10}[frequency.SelectedIndex];settings.CenterWeight=new[]{20,40,60}[weight.SelectedIndex];settings.Strength=strength.Value;settings.MaxGamma=(double)gamma.Value;settings.TransitionMs=(int)transition.Value;settings.GameOnly=gameOnly.Checked;
-        strengthLabel.Text=settings.Strength+"%";engine.Configuration=settings with{};
-        try{settings.Save();}catch(Exception e){state.Text="偏好保存失败："+e.Message;}
+        if(!initialized)return;settings.Display=display.SelectedItem?.ToString()??"";settings.Frequency=new[]{2,5,10}[frequency.SelectedIndex];settings.CenterWeight=new[]{20,40,60}[weight.SelectedIndex];settings.Strength=strength.Value;settings.MaxGamma=gamma.Value/100.0;settings.Brightness=brightness.Value;settings.Contrast=contrast.Value;settings.TransitionMs=(int)transition.Value;settings.GameOnly=gameOnly.Checked;UpdateValues();engine.Configuration=settings with{};
+        try{settings.Save();}catch(Exception e){state.Text="设置保存失败";tips.SetToolTip(state,e.Message);}previewDelay.Stop();previewDelay.Start();
     }
-    async Task Toggle()
+    void ResetSettings()
     {
-        if(stopping || closing)return;if(engine.Running){await StopAndRestore();return;}
-        if(string.IsNullOrWhiteSpace(settings.Display)){state.Text="请先选择显示器。";return;}
-        engine.Start();display.Enabled=false;start.Text="停止自动调整";
+        initialized=false;var monitor=settings.Display;var defaults=new Settings();settings.Strength=defaults.Strength;settings.MaxGamma=defaults.MaxGamma;settings.Brightness=defaults.Brightness;settings.Contrast=defaults.Contrast;settings.Frequency=defaults.Frequency;settings.CenterWeight=defaults.CenterWeight;settings.TransitionMs=defaults.TransitionMs;settings.GameOnly=defaults.GameOnly;settings.Display=monitor;LoadControls();initialized=true;SaveSettings();
     }
+    void UpdatePreviewCaption(){sourceName.Text=preview.SourceName;tips.SetToolTip(sourceName,preview.SourceName);var t=preview.Target;targetInfo.Text=$"Gamma {t.Gamma:F2} · 亮度 {t.Brightness*100:+0.0;-0.0;0} · 对比 {t.Contrast*100:+0.0;-0.0;0}";}
+    void ImportImage()
+    {
+        using var dialog=new OpenFileDialog{Title="载入对比截图",Filter="截图|*.png;*.jpg;*.jpeg;*.bmp|所有文件|*.*",CheckFileExists=true};if(dialog.ShowDialog(this)!=DialogResult.OK)return;
+        try{preview.LoadFile(dialog.FileName,settings);UpdatePreviewCaption();}catch(Exception e){MessageBox.Show(this,e.Message,"无法载入图片");}
+    }
+    void ShowWindow(){Show();WindowState=FormWindowState.Normal;Activate();}
+    void OpenSettings(){try{Directory.CreateDirectory(Settings.Folder);Process.Start(new ProcessStartInfo(Settings.Folder){UseShellExecute=true});}catch(Exception e){MessageBox.Show(this,e.Message);}}
+    async Task Toggle(){if(stopping || closing)return;if(engine.Running){await StopAndRestore();return;}if(string.IsNullOrWhiteSpace(settings.Display)){state.Text="请选择显示器";return;}engine.Start();display.Enabled=false;start.Text="暂停";}
     async Task StopAndRestore()
     {
-        if(stopping)return;stopping=true;start.Enabled=restore.Enabled=false;
-        try{await engine.Stop();GammaSession.Recover(Settings.RecoveryPath,new GammaDevice());state.Text="已停止，原始颜色已恢复。";}
-        catch(Exception e){state.Text="恢复失败，请重试："+e.Message;FilterEngine.Log(e);}
-        finally{stopping=false;start.Enabled=restore.Enabled=true;display.Enabled=true;start.Text="开启自动调整";}
+        if(stopping)return;stopping=true;start.Enabled=restore.Enabled=false;try{await engine.Stop();GammaSession.Recover(Settings.RecoveryPath,new GammaDevice());state.Text="已恢复";}catch(Exception e){state.Text="恢复失败";tips.SetToolTip(state,e.Message);FilterEngine.Log(e);}finally{stopping=false;start.Enabled=restore.Enabled=true;display.Enabled=true;start.Text="开启";}
     }
     void UpdateStatus(FilterStatus s)
     {
-        latest=s;state.Text=s.Message;curve.Gamma=s.Gamma;curve.Invalidate();
-        metrics.Text=$"\n当前 Gamma  {s.Gamma:F3}   ·   加权亮度  {s.Scene.Median:P0}\n采集 {s.CaptureMs:F2} ms  /  分析 {s.AnalysisMs:F2} ms\n最近写入 {s.WriteMs:F2} ms  ·  累计 {s.Frames} 帧\n"+(s.Verified?"驱动曲线回读已核对":"提亮后将核对驱动曲线回读");
-        tray.Text="TarkovAutoGamma · "+(s.Gamma>1.01?$"Gamma {s.Gamma:F2}":"等待 / 已恢复");
-        if(s.Stopped || !engine.Running){display.Enabled=true;start.Text="开启自动调整";}
+        state.Text=s.Message;tips.SetToolTip(state,s.Message);metricsTip=$"Gamma {s.Gamma:F3}  亮度 {s.Brightness*100:+0.0;-0.0;0}  对比度 {s.Contrast*100:+0.0;-0.0;0}\n采集 {s.CaptureMs:F2}ms · 分析 {s.AnalysisMs:F2}ms · 写入 {s.WriteMs:F2}ms\n累计 {s.Frames} 帧 · "+(s.Verified?"曲线回读已核对":"尚未核对曲线回读")+(hotkeyWarning==null?"":"\n"+hotkeyWarning);
+        tray.Text="TarkovAutoGamma · "+(!s.CurrentTone.IsIdentity?$"Gamma {s.Gamma:F2}":"等待 / 已恢复");if(s.Stopped || !engine.Running){display.Enabled=true;start.Text="开启";}
     }
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);var a=RegisterHotKey(Handle,1,0x4003,0x78);var b=RegisterHotKey(Handle,2,0x4003,0x79);
-        if(!a || !b)Shown+=(_,_)=>state.Text="部分热键被其他程序占用，可使用窗口或托盘按钮。";
-    }
-    protected override void WndProc(ref Message m)
-    {
-        var command=m.Msg==0x0312?(int)m.WParam:0;base.WndProc(ref m);
-        if(command==1)_=Toggle();if(command==2)_=StopAndRestore();
-    }
-    protected override void OnFormClosing(FormClosingEventArgs e)
-    {
-        closing=true;try{engine.Stop().GetAwaiter().GetResult();GammaSession.Recover(Settings.RecoveryPath,new GammaDevice());}catch(Exception ex){FilterEngine.Log(ex);MessageBox.Show(this,"显示颜色未能恢复。请关闭其他色彩软件，再重新打开本工具恢复。\n"+ex.Message,"恢复未完成");}
-        base.OnFormClosing(e);
-    }
-    void DisplayChanged(object? s,EventArgs e)=>RequestSystemStop("显示配置发生变化，已停止，请重新选择显示器后开启。");
-    void SessionChanged(object s,SessionSwitchEventArgs e){if(e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.SessionLogoff)RequestSystemStop("会话已锁定，自动调整已停止。");}
-    void PowerChanged(object s,PowerModeChangedEventArgs e){if(e.Mode==PowerModes.Suspend)RequestSystemStop("系统休眠，自动调整已停止。");}
-    void RequestSystemStop(string reason){try{engine.Stop().GetAwaiter().GetResult();if(IsHandleCreated)BeginInvoke(()=>{state.Text=reason;display.Enabled=true;start.Text="开启自动调整";});}catch(Exception e){FilterEngine.Log(e);}}
+    protected override void OnHandleCreated(EventArgs e){base.OnHandleCreated(e);var first=RegisterHotKey(Handle,1,0x4003,0x78);var second=RegisterHotKey(Handle,2,0x4003,0x79);if(!first || !second)hotkeyWarning="部分热键已被占用，可使用窗口或托盘按钮。";}
+    protected override void OnShown(EventArgs e){base.OnShown(e);if(hotkeyWarning!=null){state.Text="部分快捷键已被占用";tips.SetToolTip(state,hotkeyWarning);}}
+    protected override void WndProc(ref Message m){var command=m.Msg==0x0312?(int)m.WParam:0;base.WndProc(ref m);if(command==1)_=Toggle();if(command==2)_=StopAndRestore();}
+    protected override void OnFormClosing(FormClosingEventArgs e){closing=true;try{engine.Stop().GetAwaiter().GetResult();GammaSession.Recover(Settings.RecoveryPath,new GammaDevice());}catch(Exception ex){FilterEngine.Log(ex);MessageBox.Show(this,"颜色未能恢复，请重新打开本工具重试。\n"+ex.Message,"恢复未完成");}base.OnFormClosing(e);}
+    void DisplayChanged(object? s,EventArgs e)=>RequestSystemStop("显示配置变化，请重新选择显示器");
+    void SessionChanged(object s,SessionSwitchEventArgs e){if(e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.SessionLogoff)RequestSystemStop("已锁定，自动调整已停止");}
+    void PowerChanged(object s,PowerModeChangedEventArgs e){if(e.Mode==PowerModes.Suspend)RequestSystemStop("已休眠，自动调整已停止");}
+    void RequestSystemStop(string reason){try{engine.Stop().GetAwaiter().GetResult();if(IsHandleCreated)BeginInvoke(()=>{state.Text=reason;display.Enabled=true;start.Text="开启";});}catch(Exception e){FilterEngine.Log(e);}}
     protected override void Dispose(bool disposing)
     {
-        if(disposing){SystemEvents.DisplaySettingsChanging-=DisplayChanged;SystemEvents.SessionSwitch-=SessionChanged;SystemEvents.PowerModeChanged-=PowerChanged;engine.Stop().GetAwaiter().GetResult();tray.Visible=false;tray.ContextMenuStrip?.Dispose();tray.Dispose();if(IsHandleCreated){UnregisterHotKey(Handle,1);UnregisterHotKey(Handle,2);}}
+        if(disposing){previewDelay.Stop();previewDelay.Dispose();tips.Dispose();SystemEvents.DisplaySettingsChanging-=DisplayChanged;SystemEvents.SessionSwitch-=SessionChanged;SystemEvents.PowerModeChanged-=PowerChanged;engine.Stop().GetAwaiter().GetResult();tray.Visible=false;tray.ContextMenuStrip?.Dispose();tray.Dispose();if(IsHandleCreated){UnregisterHotKey(Handle,1);UnregisterHotKey(Handle,2);}}
         base.Dispose(disposing);
     }
     [DllImport("user32.dll")]static extern bool RegisterHotKey(IntPtr hwnd,int id,uint modifiers,uint key);
     [DllImport("user32.dll")]static extern bool UnregisterHotKey(IntPtr hwnd,int id);
-}
-internal sealed class CurvePanel : Panel
-{
-    internal double Gamma=1;
-    internal CurvePanel(){DoubleBuffered=true;}
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);var r=new Rectangle(12,12,Math.Max(1,Width-24),Math.Max(1,Height-24));
-        using var baseline=new Pen(Color.FromArgb(75,90,104));using var line=new Pen(Color.FromArgb(89,193,221),2);
-        e.Graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;e.Graphics.DrawLine(baseline,r.Left,r.Bottom,r.Right,r.Top);
-        var points=Enumerable.Range(0,65).Select(i=>new PointF(r.Left+i/64f*r.Width,r.Bottom-(float)Math.Pow(i/64.0,1/Gamma)*r.Height)).ToArray();e.Graphics.DrawLines(line,points);
-    }
 }
